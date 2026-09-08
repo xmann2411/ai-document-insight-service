@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Provide your key here or via a .env file next to this compose file.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-haiku-4-5}
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-embedding}
+      OCR_ENABLED: ${OCR_ENABLED:-true}
+    volumes:
+      # Cache downloaded models across container restarts (optional).
+      - model-cache:/models
+      - easyocr-cache:/root/.EasyOCR
+
+volumes:
+  model-cache:
+  easyocr-cache:
