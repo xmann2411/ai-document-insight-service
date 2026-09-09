@@ -17,15 +17,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # --- Question answering backend ---
-    # "local"  -> DistilBERT SQuAD run locally via onnxruntime. Free, offline,
-    #             no API key. This is the default.
-    # "claude" -> Anthropic Claude via API. Better answers (full sentences,
-    #             synthesis), needs ANTHROPIC_API_KEY and costs a few cents.
+    # "local"      -> sentence ranking with the cross-encoder (default). Free,
+    #                 offline, no key. Answer is a verbatim sentence.
+    # "distilbert" -> DistilBERT SQuAD span extraction via onnxruntime. Free,
+    #                 offline. Answer is a short extracted span.
+    # "claude"     -> Anthropic Claude via API. Rephrased / synthesised answers,
+    #                 needs ANTHROPIC_API_KEY, costs a few cents.
     qa_backend: str = "local"
+    qa_max_answer_chars: int = 400
 
-    # local backend
+    # distilbert backend
     qa_local_model: str = "Xenova/distilbert-base-cased-distilled-squad"
-    qa_max_answer_chars: int = 320
 
     # claude backend
     anthropic_api_key: str | None = None
@@ -39,7 +41,12 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     chunk_size: int = 900          # characters per chunk
     chunk_overlap: int = 150       # character overlap between consecutive chunks
-    top_k: int = 4                 # chunks retrieved per question
+    top_k: int = 4                 # chunks passed to the QA backend
+    # FAISS returns this many candidates, then the cross-encoder reranks them
+    # down to top_k. A cheap, large accuracy win (see app/rag.py).
+    rerank_enabled: bool = True
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_candidates: int = 12
 
     # --- OCR ---
     # OCR (Tesseract via pytesseract) reads image uploads and PDFs that have

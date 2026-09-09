@@ -17,7 +17,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["qa_backend"] in {"local", "claude"}
+    assert body["qa_backend"] in {"local", "distilbert", "claude"}
 
 
 def test_upload_returns_session_and_records(client):

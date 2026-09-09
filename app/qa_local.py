@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import threading
 
 from app.config import get_settings
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_SEQ_LEN = 384          # question + context tokens fed to the model
 _MAX_ANSWER_TOKENS = 30     # cap on span length (in tokens)
+_QA_CHUNKS = 2              # how many top-ranked chunks to run QA on
 
 _state = None
 _lock = threading.Lock()
@@ -100,6 +102,7 @@ def _answer_one(model: _Model, question: str, context: str) -> tuple[str, float]
     char_start = enc.offsets[i][0]
     char_end = enc.offsets[j][1]
     answer = " ".join(context[char_start:char_end].split())  # collapse whitespace
+    answer = re.sub(r"^\d+\.\s*", "", answer).strip(" .,:;")  # drop list markers
 
     # confidence: geometric mean of the start/end probabilities
     conf = math.sqrt(_softmax_max(start_logits) * _softmax_max(end_logits))
@@ -109,7 +112,11 @@ def _answer_one(model: _Model, question: str, context: str) -> tuple[str, float]
 def answer_question(question: str, chunks: list[dict]) -> dict:
     """
     Returns {"answer", "confidence", "sources"}.
-    Runs the model on each retrieved chunk and keeps the best span.
+
+    Runs the extractive model on the top few retrieved chunks (already
+    ordered by the reranker) and keeps the best span. Only the top
+    `_QA_CHUNKS` are considered so a badly-ranked chunk with a
+    confident-looking but wrong span can't win.
     """
     if not chunks:
         return {
@@ -121,8 +128,9 @@ def answer_question(question: str, chunks: list[dict]) -> dict:
     model = _load()
     settings = get_settings()
 
-    best = {"answer": "", "confidence": -1.0, "chunk": chunks[0]}
-    for chunk in chunks:
+    considered = chunks[:_QA_CHUNKS]
+    best = {"answer": "", "confidence": -1.0, "chunk": considered[0]}
+    for chunk in considered:
         answer, conf = _answer_one(model, question, chunk["text"])
         if answer and conf > best["confidence"]:
             best = {"answer": answer, "confidence": conf, "chunk": chunk}
@@ -148,5 +156,7 @@ def _sources(chunks: list[dict], picked: dict) -> list[dict]:
         }
         if "score" in c:
             entry["score"] = round(c["score"], 3)
+        if "rerank_score" in c:
+            entry["rerank_score"] = c["rerank_score"]
         out.append(entry)
     return out

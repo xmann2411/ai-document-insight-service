@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 _embedder = None
 _embedder_lock = threading.Lock()
+_reranker = None
+_reranker_lock = threading.Lock()
 
 
 def chunk_text(text: str, size: int, overlap: int) -> list[str]:
@@ -75,6 +77,45 @@ def _embed(texts: list[str]):
     return arr / norms
 
 
+def get_reranker():
+    global _reranker
+    if _reranker is None:
+        with _reranker_lock:
+            if _reranker is None:
+                from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+                settings = get_settings()
+                logger.info("Loading reranker model %s", settings.rerank_model)
+                _reranker = TextCrossEncoder(settings.rerank_model)
+    return _reranker
+
+
+def rerank(question: str, chunks: list[dict], top_k: int) -> list[dict]:
+    """
+    Re-score FAISS candidates with a cross-encoder (query + chunk scored
+    together, not as separate vectors) and keep the best `top_k`.
+
+    Bi-encoder retrieval (FAISS) is fast but approximate; the cross-encoder
+    is slower but much more accurate at judging "does this chunk actually
+    answer the question", which is what removes wrong-document answers.
+    """
+    if len(chunks) <= 1:
+        return chunks
+    try:
+        scores = list(get_reranker().rerank(question, [c["text"] for c in chunks]))
+    except Exception:  # noqa: BLE001 - fall back to the FAISS order
+        logger.exception("Rerank failed; using embedding order")
+        return chunks[:top_k]
+
+    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
+    out = []
+    for score, chunk in ranked[:top_k]:
+        chunk = dict(chunk)
+        chunk["rerank_score"] = round(float(score), 3)
+        out.append(chunk)
+    return out
+
+
 class SessionIndex:
     """Holds the chunks (and, in embedding mode, the FAISS index) for one session."""
 
@@ -114,23 +155,34 @@ class SessionIndex:
         self._index = index
 
     def search(self, question: str) -> list[dict]:
-        """Return the most relevant chunks for a question, best first."""
+        """
+        Return the most relevant chunks for a question, best first.
+
+        embedding mode: FAISS retrieves `rerank_candidates`, then (if enabled)
+        a cross-encoder reranks them down to `top_k`.
+        """
         if not self._chunks:
             return []
         if self.mode != "embedding" or self._index is None:
             return list(self._chunks)
 
+        settings = get_settings()
+        pool = settings.rerank_candidates if settings.rerank_enabled else self.top_k
+        k = min(pool, len(self._chunks))
+
         query = _embed([question])
-        k = min(self.top_k, len(self._chunks))
         scores, ids = self._index.search(query, k)
-        results = []
+        candidates = []
         for score, idx in zip(scores[0], ids[0]):
             if idx == -1:
                 continue
             hit = dict(self._chunks[idx])
-            hit["score"] = float(score)
-            results.append(hit)
-        return results
+            hit["score"] = round(float(score), 3)
+            candidates.append(hit)
+
+        if settings.rerank_enabled:
+            return rerank(question, candidates, self.top_k)
+        return candidates[: self.top_k]
 
     @property
     def chunk_count(self) -> int:

@@ -1,10 +1,11 @@
 """
 QA engine - dispatches to the configured backend:
 
-  QA_BACKEND=local   -> app/qa_local.py  (DistilBERT SQuAD via onnxruntime)
-  QA_BACKEND=claude  -> Anthropic Claude via API
+  QA_BACKEND=local      -> app/qa_sentences.py  (sentence ranking, default)
+  QA_BACKEND=distilbert -> app/qa_local.py      (DistilBERT SQuAD span extraction)
+  QA_BACKEND=claude     -> Anthropic Claude via API
 
-Both take the question plus the chunks selected by retrieval (app/rag.py)
+All take the question plus the chunks selected by retrieval (app/rag.py)
 and return {"answer": str, "sources": [...], ...}. The retrieval step
 decides *which* text the model sees; this module just formats and calls.
 """
@@ -37,10 +38,16 @@ def answer_question(question: str, chunks: list[dict]) -> dict:
     if backend == "claude":
         return _answer_with_claude(question, chunks)
     if backend == "local":
+        from app import qa_sentences
+
+        return {"backend": "local", **qa_sentences.answer_question(question, chunks)}
+    if backend == "distilbert":
         from app import qa_local
 
-        return {"backend": "local", **qa_local.answer_question(question, chunks)}
-    raise QAConfigError(f"Unknown QA_BACKEND '{backend}' (use 'local' or 'claude')")
+        return {"backend": "distilbert", **qa_local.answer_question(question, chunks)}
+    raise QAConfigError(
+        f"Unknown QA_BACKEND '{backend}' (use 'local', 'distilbert' or 'claude')"
+    )
 
 
 # --- Claude backend -------------------------------------------------------
@@ -103,6 +110,8 @@ def _answer_with_claude(question: str, chunks: list[dict]) -> dict:
         }
         if "score" in c:
             entry["score"] = round(c["score"], 3)
+        if "rerank_score" in c:
+            entry["rerank_score"] = c["rerank_score"]
         sources.append(entry)
 
     return {"backend": "claude", "answer": answer, "sources": sources}

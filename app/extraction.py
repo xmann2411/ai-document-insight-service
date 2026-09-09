@@ -18,12 +18,38 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 
 import pymupdf
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_WS_RUN = re.compile(r"[ \t]{2,}")
+_MULTI_NL = re.compile(r"\n{3,}")
+# a line break that continues the same sentence: previous char isn't sentence-
+# ending punctuation and the next line starts lowercase / a conjunction.
+_SOFT_WRAP = re.compile(r"(?<=[^.!?:;)\]\"'\n])[ \t]*\n[ \t]*(?=[a-z(])")
+
+
+def normalize_text(text: str) -> str:
+    """
+    Clean up extracted text for downstream chunking / QA.
+
+    PDF and OCR output is full of layout artefacts. We:
+      - strip leading indentation from every line,
+      - join *soft* line wraps (a line break mid-sentence) so a clause isn't
+        split, while keeping *hard* line breaks (each invoice field on its
+        own line) as sentence boundaries,
+      - collapse runs of spaces and blank lines.
+    """
+    text = text.replace("\r\n", "\n").replace("\xa0", " ")
+    text = "\n".join(line.strip() for line in text.split("\n"))
+    text = _SOFT_WRAP.sub(" ", text)
+    text = _MULTI_NL.sub("\n\n", text)
+    text = _WS_RUN.sub(" ", text)
+    return text.strip()
 
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -97,14 +123,14 @@ def _extract_from_pdf(file_bytes: bytes) -> str:
                 pix = doc[page_index].get_pixmap(dpi=200)
                 text_parts.append(_ocr(pix.tobytes("png")))
 
-    full_text = "\n".join(part for part in text_parts if part).strip()
+    full_text = "\n\n".join(part for part in text_parts if part).strip()
     if not full_text:
         raise ValueError(
             "No extractable text found in PDF. It looks like a scanned "
             "document without a text layer; enable OCR (OCR_ENABLED=true) "
             "to read it."
         )
-    return full_text
+    return normalize_text(full_text)
 
 
 def _extract_from_image(file_bytes: bytes) -> str:
@@ -113,4 +139,4 @@ def _extract_from_image(file_bytes: bytes) -> str:
     text = _ocr(file_bytes)
     if not text:
         raise ValueError("OCR produced no text for this image.")
-    return text
+    return normalize_text(text)

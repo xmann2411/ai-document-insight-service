@@ -34,20 +34,42 @@ def test_embedding_retrieval_ranks_relevant_chunk_first():
     assert hits[0]["score"] >= hits[-1]["score"]
 
 
-def test_local_qa_extracts_answer_span():
+_INVOICE_CHUNK = {
+    "filename": "invoice.pdf",
+    "text": (
+        "INVOICE #INV-2026-0341. Date of issue: 2026-08-15. "
+        "Due date: 2026-09-14. Subtotal EUR 3,580.50. "
+        "Total due: EUR 4,475.63. Payment terms: Net 30 days."
+    ),
+}
+
+
+def test_distilbert_qa_extracts_answer_span():
     from app.qa_local import answer_question
 
-    chunks = [
-        {
-            "filename": "invoice.pdf",
-            "text": (
-                "INVOICE #INV-2026-0341. Date of issue: 2026-08-15. "
-                "Due date: 2026-09-14. Subtotal EUR 3,580.50. "
-                "Total due: EUR 4,475.63. Payment terms: Net 30 days."
-            ),
-        }
-    ]
-    result = answer_question("What is the total due?", chunks)
+    result = answer_question("What is the total due?", [_INVOICE_CHUNK])
     assert "4,475.63" in result["answer"]
     assert result["confidence"] > 0
     assert result["sources"][0]["used"] is True
+
+
+def test_sentence_qa_returns_relevant_sentence():
+    from app.qa_sentences import answer_question
+
+    contract = {
+        "filename": "contract.pdf",
+        "text": (
+            "Fees. Client shall pay Provider EUR 75.00 per hour. "
+            "Termination. Either party may terminate for convenience with "
+            "30 days prior written notice. "
+            "Confidentiality. Each party shall keep information secret for "
+            "2 years after the agreement ends."
+        ),
+    }
+    result = answer_question(
+        "How long does confidentiality last after the agreement ends?",
+        [_INVOICE_CHUNK, contract],
+    )
+    assert "2 years" in result["answer"]
+    assert result["sources"], "sources returned"
+    assert any(s["used"] for s in result["sources"])

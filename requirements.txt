@@ -10,8 +10,8 @@ pymupdf>=1.24
 pytesseract>=0.3.13         # needs the `tesseract` binary on PATH (in Docker)
 pillow>=10.0
 
-# retrieval (RAG): ONNX embeddings + vector index
-fastembed>=0.4
+# retrieval (RAG): ONNX embeddings + cross-encoder reranker + vector index
+fastembed[rerank]>=0.4
 faiss-cpu>=1.8
 numpy>=1.26
 
