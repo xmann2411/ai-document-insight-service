@@ -13,7 +13,9 @@ def _upload(client, *filenames, session_id=None):
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["qa_backend"] in {"local", "claude"}
 
 
 def test_upload_returns_session_and_records(client):
@@ -56,13 +58,13 @@ def test_ask_empty_question_422(client, fake_llm):
     assert r.status_code == 422
 
 
-def test_ask_without_api_key_returns_503(client, monkeypatch):
+def test_ask_with_claude_backend_but_no_key_returns_503(client, monkeypatch):
     from app.qa_engine import QAConfigError
 
     def _boom():
         raise QAConfigError("ANTHROPIC_API_KEY is not set.")
 
-    monkeypatch.setattr("app.qa_engine._get_client", _boom)
+    monkeypatch.setattr("app.qa_engine._get_claude_client", _boom)
     session_id = _upload(client, "sample_invoice.pdf").json()["session_id"]
     r = client.post("/ask", data={"session_id": session_id, "question": "total?"})
     assert r.status_code == 503

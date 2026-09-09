@@ -1,10 +1,24 @@
-# Core runtime - lightweight, installs on any modern Python (incl. 3.13/3.14).
-# The RAG + OCR stack lives in requirements-rag.txt (used by the Docker image).
+# Full runtime - torch-free, installs on Python 3.11 - 3.14, CPU only.
 fastapi>=0.115,<0.116
 uvicorn[standard]>=0.30,<0.35
 python-multipart>=0.0.9
-pymupdf>=1.24
-anthropic>=0.40
 python-dotenv>=1.0
 pydantic-settings>=2.4
+
+# document extraction
+pymupdf>=1.24
+pytesseract>=0.3.13         # needs the `tesseract` binary on PATH (in Docker)
+pillow>=10.0
+
+# retrieval (RAG): ONNX embeddings + vector index
+fastembed>=0.4
+faiss-cpu>=1.8
 numpy>=1.26
+
+# local question answering: DistilBERT SQuAD via onnxruntime
+onnxruntime>=1.19
+tokenizers>=0.20
+huggingface-hub>=0.24
+
+# optional cloud QA backend (QA_BACKEND=claude)
+anthropic>=0.40

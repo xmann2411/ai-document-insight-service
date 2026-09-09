@@ -1,11 +1,12 @@
 """
-QA engine: answer a question grounded in retrieved document chunks,
-using Claude as the LLM.
+QA engine - dispatches to the configured backend:
 
-The retrieval step (app/rag.py) selects which chunks to send; this module
-just formats them into a prompt, calls Claude, and returns the answer
-together with the sources it was given (useful for the caller to verify
-the answer isn't hallucinated).
+  QA_BACKEND=local   -> app/qa_local.py  (DistilBERT SQuAD via onnxruntime)
+  QA_BACKEND=claude  -> Anthropic Claude via API
+
+Both take the question plus the chunks selected by retrieval (app/rag.py)
+and return {"answer": str, "sources": [...], ...}. The retrieval step
+decides *which* text the model sees; this module just formats and calls.
 """
 
 from __future__ import annotations
@@ -16,6 +17,11 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+class QAConfigError(RuntimeError):
+    """Raised when the selected backend is not usable (e.g. missing API key)."""
+
+
 SYSTEM_PROMPT = (
     "You are a document assistant. Answer the user's question using ONLY the "
     "information in the provided document excerpts. If the answer is not "
@@ -23,72 +29,80 @@ SYSTEM_PROMPT = (
     "do not guess or use outside knowledge. Quote short snippets when helpful."
 )
 
-_client = None
-
-
-class QAConfigError(RuntimeError):
-    """Raised when the LLM backend is not configured (e.g. missing API key)."""
-
-
-def _get_client():
-    global _client
-    if _client is None:
-        settings = get_settings()
-        if not settings.anthropic_api_key:
-            raise QAConfigError(
-                "ANTHROPIC_API_KEY is not set. Add it to your environment or "
-                ".env file to enable question answering."
-            )
-        from anthropic import Anthropic
-
-        _client = Anthropic(api_key=settings.anthropic_api_key)
-    return _client
-
-
-def _format_context(chunks: list[dict]) -> str:
-    blocks = []
-    for i, chunk in enumerate(chunks, start=1):
-        blocks.append(
-            f"[Excerpt {i} - source: {chunk['filename']}]\n{chunk['text']}"
-        )
-    return "\n\n---\n\n".join(blocks)
+_claude_client = None
 
 
 def answer_question(question: str, chunks: list[dict]) -> dict:
-    """
-    Returns {"answer": str, "sources": [{"filename", "snippet", "score"?}]}.
-    """
+    backend = get_settings().qa_backend
+    if backend == "claude":
+        return _answer_with_claude(question, chunks)
+    if backend == "local":
+        from app import qa_local
+
+        return {"backend": "local", **qa_local.answer_question(question, chunks)}
+    raise QAConfigError(f"Unknown QA_BACKEND '{backend}' (use 'local' or 'claude')")
+
+
+# --- Claude backend -------------------------------------------------------
+def _get_claude_client():
+    global _claude_client
+    if _claude_client is None:
+        settings = get_settings()
+        if not settings.anthropic_api_key:
+            raise QAConfigError(
+                "QA_BACKEND=claude but ANTHROPIC_API_KEY is not set. Add the key "
+                "or switch to QA_BACKEND=local (free, offline)."
+            )
+        from anthropic import Anthropic
+
+        _claude_client = Anthropic(api_key=settings.anthropic_api_key)
+    return _claude_client
+
+
+def _format_context(chunks: list[dict]) -> str:
+    return "\n\n---\n\n".join(
+        f"[Excerpt {i} - source: {c['filename']}]\n{c['text']}"
+        for i, c in enumerate(chunks, start=1)
+    )
+
+
+def _answer_with_claude(question: str, chunks: list[dict]) -> dict:
     if not chunks:
         return {
+            "backend": "claude",
             "answer": "No documents have been uploaded for this session yet.",
             "sources": [],
         }
 
     settings = get_settings()
-    client = _get_client()
-
-    user_message = (
-        f"Document excerpts:\n\n{_format_context(chunks)}\n\n"
-        f"Question: {question}"
-    )
+    client = _get_claude_client()
 
     response = client.messages.create(
         model=settings.llm_model,
         max_tokens=settings.llm_max_tokens,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Document excerpts:\n\n{_format_context(chunks)}\n\n"
+                    f"Question: {question}"
+                ),
+            }
+        ],
     )
-
     answer = "".join(
         block.text for block in response.content if block.type == "text"
     ).strip()
 
-    sources = [
-        {
+    sources = []
+    for c in chunks:
+        entry = {
             "filename": c["filename"],
             "snippet": c["text"][:200] + ("..." if len(c["text"]) > 200 else ""),
-            **({"score": round(c["score"], 3)} if "score" in c else {}),
         }
-        for c in chunks
-    ]
-    return {"answer": answer, "sources": sources}
+        if "score" in c:
+            entry["score"] = round(c["score"], 3)
+        sources.append(entry)
+
+    return {"backend": "claude", "answer": answer, "sources": sources}

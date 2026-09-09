@@ -49,9 +49,9 @@ app = FastAPI(
 def health() -> dict:
     return {
         "status": "ok",
+        "qa_backend": settings.qa_backend,
         "retrieval_mode": settings.retrieval_mode,
-        "llm_model": settings.llm_model,
-        "llm_configured": bool(settings.anthropic_api_key),
+        "claude_key_configured": bool(settings.anthropic_api_key),
         "ocr_enabled": settings.ocr_enabled,
     }
 

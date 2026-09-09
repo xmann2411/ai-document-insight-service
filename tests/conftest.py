@@ -1,9 +1,10 @@
 """
 Shared test fixtures.
 
-Tests run in RETRIEVAL_MODE=full so they don't need the embedding stack
-(sentence-transformers / torch). The Claude call is always mocked - no
-network, no API key required.
+Tests run with RETRIEVAL_MODE=full and QA_BACKEND=claude with the Claude
+call mocked - so the suite needs no model downloads, no API key and no
+network, and stays fast. The local ONNX backend and embedding retrieval
+are exercised by the opt-in tests in test_models.py.
 """
 
 import os
@@ -11,6 +12,7 @@ from pathlib import Path
 
 os.environ.setdefault("RETRIEVAL_MODE", "full")
 os.environ.setdefault("OCR_ENABLED", "false")
+os.environ.setdefault("QA_BACKEND", "claude")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-not-used")
 
 import pytest
@@ -36,7 +38,7 @@ def client():
 
 @pytest.fixture
 def fake_llm(monkeypatch):
-    """Replace the Anthropic call with a canned response that echoes context."""
+    """Replace the Anthropic call with a canned response."""
 
     class _Block:
         type = "text"
@@ -56,5 +58,5 @@ def fake_llm(monkeypatch):
     class _FakeClient:
         messages = _Messages()
 
-    monkeypatch.setattr("app.qa_engine._get_client", lambda: _FakeClient())
+    monkeypatch.setattr("app.qa_engine._get_claude_client", lambda: _FakeClient())
     return _FakeClient

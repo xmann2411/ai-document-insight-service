@@ -1,19 +1,18 @@
 """
 Retrieval-Augmented Generation helpers.
 
-Why RAG here: sending whole documents to the LLM works for one short
-file but breaks down as documents get longer or more numerous - too many
-input tokens (cost + latency) and more noise for the model. Instead we:
+Why RAG here: sending whole documents to the QA backend works for one
+short file but breaks down as documents get longer or more numerous - too
+much context (cost / latency / the 512-token limit of the local model) and
+more noise. Instead we:
 
   1. split each document into overlapping character chunks,
-  2. embed chunks with a small sentence-transformers model,
+  2. embed chunks with a small ONNX embedding model (fastembed - no torch),
   3. index the vectors in FAISS (cosine similarity via normalised inner
      product),
-  4. at question time, embed the question and retrieve the top-k chunks
-     as the LLM context.
+  4. at question time, embed the question and retrieve the top-k chunks.
 
-`RETRIEVAL_MODE=full` bypasses all of this and returns every chunk, for
-environments that can't install the embedding stack.
+`RETRIEVAL_MODE=full` bypasses steps 2-4 and returns every chunk.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_model = None
-_model_lock = threading.Lock()
+_embedder = None
+_embedder_lock = threading.Lock()
 
 
 def chunk_text(text: str, size: int, overlap: int) -> list[str]:
@@ -42,7 +41,6 @@ def chunk_text(text: str, size: int, overlap: int) -> list[str]:
     while start < len(text):
         end = min(start + size, len(text))
         if end < len(text):
-            # back up to the last whitespace so we don't cut mid-word
             pivot = text.rfind(" ", start + overlap, end)
             if pivot != -1:
                 end = pivot
@@ -53,27 +51,28 @@ def chunk_text(text: str, size: int, overlap: int) -> list[str]:
     return [c for c in chunks if c]
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        with _model_lock:
-            if _model is None:
-                from sentence_transformers import SentenceTransformer
+def _get_embedder():
+    global _embedder
+    if _embedder is None:
+        with _embedder_lock:
+            if _embedder is None:
+                from fastembed import TextEmbedding
 
                 settings = get_settings()
                 logger.info("Loading embedding model %s", settings.embedding_model)
-                _model = SentenceTransformer(settings.embedding_model)
-    return _model
+                _embedder = TextEmbedding(settings.embedding_model)
+    return _embedder
 
 
 def _embed(texts: list[str]):
     import numpy as np
 
-    model = _get_model()
-    vectors = model.encode(
-        texts, normalize_embeddings=True, convert_to_numpy=True
-    )
-    return vectors.astype("float32")
+    vectors = list(_get_embedder().embed(texts))
+    arr = np.asarray(vectors, dtype="float32")
+    # normalise so inner product == cosine similarity
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return arr / norms
 
 
 class SessionIndex:
@@ -86,7 +85,6 @@ class SessionIndex:
         self._chunks: list[dict] = []   # {"filename": str, "text": str}
         self._index = None              # faiss.IndexFlatIP or None
 
-    # -- ingestion -------------------------------------------------------
     def add_document(self, filename: str, text: str) -> int:
         settings = get_settings()
         pieces = chunk_text(text, settings.chunk_size, settings.chunk_overlap)
@@ -99,7 +97,7 @@ class SessionIndex:
         if self.mode == "embedding":
             try:
                 self._reindex()
-            except Exception:  # noqa: BLE001 - fall back rather than fail upload
+            except Exception:  # noqa: BLE001 - degrade rather than fail the upload
                 logger.exception(
                     "Embedding index build failed; falling back to full-context mode"
                 )
@@ -115,7 +113,6 @@ class SessionIndex:
         index.add(vectors)
         self._index = index
 
-    # -- retrieval ------------------------------------------------------
     def search(self, question: str) -> list[dict]:
         """Return the most relevant chunks for a question, best first."""
         if not self._chunks:
