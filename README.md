@@ -31,6 +31,7 @@ backend for higher-quality answers.
 | Requirement | Status |
 |---|---|
 | `POST /upload` – one or more documents, session-based retrieval | ✅ |
+| `POST /sessions/{id}/documents` – add documents to a session | ✅ |
 | `POST /ask` – QA pipeline over stored documents | ✅ |
 | Dockerized | ✅ (`Dockerfile` + `docker-compose.yml`) |
 | Dummy test documents in the repo | ✅ (`test_docs/`) |
@@ -178,10 +179,8 @@ curl -s localhost:8000/health
 
 ### `POST /upload`  · `multipart/form-data`
 
-| Field | Type | Notes |
-|---|---|---|
-| `files` | file(s) | One or more. `.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`. |
-| `session_id` | string | Optional. Omit to start a new session; pass an existing one to add to it. |
+Uploads documents and creates a **new** session. Field `files` – one or more
+`.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`.
 
 ```bash
 curl -s -X POST localhost:8000/upload \
@@ -199,6 +198,11 @@ curl -s -X POST localhost:8000/upload \
 ```
 
 Unsupported/unreadable files are reported per-file; if *nothing* processed → `422`.
+
+### `POST /sessions/{session_id}/documents`  · `multipart/form-data`
+
+Adds more documents to an existing session (same `files` field). `404` if the
+session doesn't exist.
 
 ### `POST /ask`  · `multipart/form-data`
 
@@ -276,7 +280,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The default suite (17 tests) runs in `RETRIEVAL_MODE=full` with the Claude call
+The default suite (19 tests) runs in `RETRIEVAL_MODE=full` with the Claude call
 mocked – **no model download, no API key, no network**. Two extra tests actually
 download and run the real models:
 

@@ -1,13 +1,15 @@
 from tests.conftest import TEST_DOCS
 
 
-def _upload(client, *filenames, session_id=None):
-    files = [
+def _files(*filenames):
+    return [
         ("files", (name, (TEST_DOCS / name).read_bytes(), "application/octet-stream"))
         for name in filenames
     ]
-    data = {"session_id": session_id} if session_id else {}
-    return client.post("/upload", files=files, data=data)
+
+
+def _upload(client, *filenames):
+    return client.post("/upload", files=_files(*filenames))
 
 
 def test_health(client):
@@ -49,6 +51,19 @@ def test_ask_flow_with_mocked_llm(client, fake_llm):
 
 def test_ask_unknown_session_404(client, fake_llm):
     r = client.post("/ask", data={"session_id": "nope", "question": "hi"})
+    assert r.status_code == 404
+
+
+def test_add_documents_to_existing_session(client):
+    session_id = _upload(client, "sample_invoice.pdf").json()["session_id"]
+    r = client.post(f"/sessions/{session_id}/documents", files=_files("sample_contract.pdf"))
+    assert r.status_code == 200
+    info = client.get(f"/sessions/{session_id}").json()
+    assert len(info["documents"]) == 2
+
+
+def test_add_documents_unknown_session_404(client):
+    r = client.post("/sessions/nope/documents", files=_files("sample_invoice.pdf"))
     assert r.status_code == 404
 
 
