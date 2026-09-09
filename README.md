@@ -16,6 +16,7 @@ backend for higher-quality answers.
 - [Features](#features)
 - [Architecture](#architecture)
 - [Quick start (Docker)](#quick-start-docker)
+- [Demo UI](#demo-ui)
 - [Manual installation](#manual-installation)
 - [Configuration](#configuration)
 - [API reference & examples](#api-reference--examples)
@@ -39,6 +40,7 @@ backend for higher-quality answers.
 | Text extraction: PyMuPDF (digital PDFs) **+ Tesseract OCR** (images / scanned PDFs) | ✅ |
 | Three QA backends: local sentence-ranking (default), local DistilBERT-SQuAD, or Claude | ✅ |
 | Answers cite the source excerpts they used | ✅ |
+| **Optional enhancement: Streamlit demo UI** (`ui.py`) | ✅ |
 | Structured logging, health check, env-based config, CI | ✅ |
 
 ---
@@ -76,8 +78,13 @@ docker compose up --build
 ```
 
 First build downloads the embedding + reranker models (~180 MB) and bakes them
-into the image, so the running container needs no network. The API is then on
-<http://localhost:8000> – open <http://localhost:8000/docs> for Swagger UI.
+into the image, so the running container needs no network. `docker compose` starts
+two services:
+
+| URL | What |
+|---|---|
+| <http://localhost:8501> | **Streamlit demo UI** – upload + ask, point-and-click |
+| <http://localhost:8000/docs> | API + Swagger UI |
 
 ```bash
 curl -s localhost:8000/health | jq
@@ -95,6 +102,23 @@ Plain `docker`:
 docker build -t doc-insight .
 docker run -p 8000:8000 doc-insight                       # local model
 docker run -p 8000:8000 -e QA_BACKEND=claude -e ANTHROPIC_API_KEY=sk-ant-xxx doc-insight
+```
+
+---
+
+## Demo UI
+
+A small [Streamlit](https://streamlit.io) app (`ui.py`) that drives the API from a
+browser – file uploader in the sidebar, a chat box for questions, answers with an
+expandable list of source excerpts (the used one starred) and the rerank scores.
+It's a plain HTTP client: no ML dependencies, it just calls `/upload` and `/ask`.
+
+With Docker it's already running at <http://localhost:8501>. Standalone:
+
+```bash
+pip install -r requirements-ui.txt
+uvicorn app.main:app --port 8000        # API in one terminal
+API_URL=http://localhost:8000 streamlit run ui.py   # UI in another
 ```
 
 ---

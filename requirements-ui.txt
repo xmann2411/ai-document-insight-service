@@ -1,0 +1,3 @@
+# Streamlit demo UI (ui.py). Talks to the API over HTTP - no ML deps.
+streamlit>=1.30
+requests>=2.31
