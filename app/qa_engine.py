@@ -36,18 +36,34 @@ _claude_client = None
 def answer_question(question: str, chunks: list[dict]) -> dict:
     backend = get_settings().qa_backend
     if backend == "claude":
-        return _answer_with_claude(question, chunks)
-    if backend == "local":
+        result = _answer_with_claude(question, chunks)
+    elif backend == "local":
         from app import qa_sentences
 
-        return {"backend": "local", **qa_sentences.answer_question(question, chunks)}
-    if backend == "distilbert":
+        result = {"backend": "local", **qa_sentences.answer_question(question, chunks)}
+    elif backend == "distilbert":
         from app import qa_local
 
-        return {"backend": "distilbert", **qa_local.answer_question(question, chunks)}
-    raise QAConfigError(
-        f"Unknown QA_BACKEND '{backend}' (use 'local', 'distilbert' or 'claude')"
-    )
+        result = {"backend": "distilbert", **qa_local.answer_question(question, chunks)}
+    else:
+        raise QAConfigError(
+            f"Unknown QA_BACKEND '{backend}' (use 'local', 'distilbert' or 'claude')"
+        )
+
+    result["entities"] = _entities(result.get("answer", ""))
+    return result
+
+
+def _entities(answer: str) -> list[dict]:
+    if not get_settings().ner_enabled:
+        return []
+    try:
+        from app import ner
+
+        return ner.extract_entities(answer)
+    except Exception:  # noqa: BLE001 - NER is a nice-to-have, never fail /ask
+        logger.exception("NER failed")
+        return []
 
 
 # --- Claude backend -------------------------------------------------------

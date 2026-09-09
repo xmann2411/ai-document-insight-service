@@ -24,7 +24,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-from app import storage
+from app import cache, storage
 from app.config import get_settings
 from app.extraction import extract_text, is_supported
 from app.qa_engine import QAConfigError, answer_question
@@ -57,8 +57,11 @@ def health() -> dict:
         "status": "ok",
         "qa_backend": settings.qa_backend,
         "retrieval_mode": settings.retrieval_mode,
-        "claude_key_configured": bool(settings.anthropic_api_key),
+        "rerank_enabled": settings.rerank_enabled,
+        "ner_enabled": settings.ner_enabled,
         "ocr_enabled": settings.ocr_enabled,
+        "claude_key_configured": bool(settings.anthropic_api_key),
+        "cache": cache.stats(),
     }
 
 
@@ -92,6 +95,8 @@ async def _ingest(session_id: str, files: list[UploadFile]) -> list[dict]:
         record = storage.add_document(session_id, name, text)
         results.append({**record, "status": "ok"})
 
+    if any(r["status"] == "ok" for r in results):
+        cache.invalidate(session_id)  # answers may change now
     return results
 
 
@@ -148,14 +153,19 @@ async def ask_question(
     if not question:
         raise HTTPException(status_code=422, detail="Question must not be empty")
 
-    chunks = storage.search(session_id, question)
+    backend = settings.qa_backend
+    cached = cache.get(session_id, question, backend)
+    if cached is not None:
+        return {"session_id": session_id, "question": question, "cached": True, **cached}
 
+    chunks = storage.search(session_id, question)
     try:
         result = answer_question(question, chunks)
     except QAConfigError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    return {"session_id": session_id, "question": question, **result}
+    cache.put(session_id, question, backend, result)
+    return {"session_id": session_id, "question": question, "cached": False, **result}
 
 
 @app.get("/sessions/{session_id}")

@@ -67,6 +67,20 @@ def _ext(filename: str) -> str:
     return f".{tail.lower()}" if tail else ""
 
 
+def _preprocess_for_ocr(image):
+    """Grayscale, upscale small images, and boost contrast - Tesseract does
+    markedly better on ~300 DPI, high-contrast, greyscale input."""
+    from PIL import ImageOps
+
+    image = ImageOps.exif_transpose(image).convert("L")
+    if min(image.size) < 1000:
+        scale = 1000 / min(image.size)
+        image = image.resize(
+            (round(image.width * scale), round(image.height * scale))
+        )
+    return ImageOps.autocontrast(image)
+
+
 def _ocr(image_bytes: bytes) -> str:
     try:
         import pytesseract
@@ -75,7 +89,7 @@ def _ocr(image_bytes: bytes) -> str:
         raise ValueError(f"OCR dependencies not installed: {e}") from e
 
     try:
-        image = Image.open(io.BytesIO(image_bytes))
+        image = _preprocess_for_ocr(Image.open(io.BytesIO(image_bytes)))
         return pytesseract.image_to_string(
             image, lang=get_settings().ocr_lang_string
         ).strip()

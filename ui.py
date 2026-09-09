@@ -18,6 +18,8 @@ import requests
 import streamlit as st
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000").rstrip("/")
+# Comma-separated paths to auto-upload on first load (handy for demos/screenshots).
+DEMO_DOCS = [p.strip() for p in os.environ.get("DEMO_DOCS", "").split(",") if p.strip()]
 
 st.set_page_config(page_title="Document Insight", page_icon="📄", layout="centered")
 st.session_state.setdefault("history", [])
@@ -54,6 +56,22 @@ def do_upload(files) -> None:
     st.toast(f"Indexed {ok} file(s)")
 
 
+def do_upload_paths(paths: list[str]) -> None:
+    from pathlib import Path
+
+    payload = [
+        ("files", (Path(p).name, Path(p).read_bytes(), "application/octet-stream"))
+        for p in paths if Path(p).exists()
+    ]
+    if not payload:
+        return
+    resp = requests.post(f"{API_URL}/upload", files=payload, timeout=180)
+    if resp.status_code == 200:
+        data = resp.json()
+        st.session_state.session_id = data["session_id"]
+        st.session_state.docs.extend(data["files"])
+
+
 def do_ask(question: str):
     try:
         resp = requests.post(
@@ -68,13 +86,45 @@ def do_ask(question: str):
     return resp.json()
 
 
+_ENTITY_COLORS = {
+    "PERSON": "#c8e6c9", "ORG": "#bbdefb", "LOCATION": "#ffe0b2",
+    "MONEY": "#c5e1a5", "DATE": "#f8bbd0", "PERCENT": "#d1c4e9",
+    "EMAIL": "#b2ebf2", "IBAN": "#b2ebf2",
+}
+
+
+def _highlight(text: str, entities: list[dict]) -> str:
+    import html
+
+    spans = sorted((e for e in entities if "start" in e), key=lambda e: e["start"])
+    out, cursor = [], 0
+    for e in spans:
+        if e["start"] < cursor:
+            continue
+        out.append(html.escape(text[cursor:e["start"]]))
+        color = _ENTITY_COLORS.get(e["label"], "#eeeeee")
+        out.append(
+            f'<mark style="background:{color};padding:0 .2em;border-radius:.2em">'
+            f'{html.escape(text[e["start"]:e["end"]])}'
+            f'<sub style="opacity:.6;font-size:.7em"> {e["label"]}</sub></mark>'
+        )
+        cursor = e["end"]
+    out.append(html.escape(text[cursor:]))
+    return "".join(out)
+
+
 def render_answer(result: dict) -> None:
     if "error" in result:
         st.error(result["error"])
         return
-    st.write(result["answer"])
+    entities = result.get("entities", [])
+    if entities:
+        st.markdown(_highlight(result["answer"], entities), unsafe_allow_html=True)
+    else:
+        st.write(result["answer"])
     left, right = st.columns(2)
-    left.caption(f"backend: {result.get('backend', '?')}")
+    tag = result.get("backend", "?") + (" · cached" if result.get("cached") else "")
+    left.caption(f"backend: {tag}")
     if "confidence" in result:
         right.caption(f"confidence: {result['confidence']:.2f}")
     srcs = result.get("sources", [])
@@ -90,6 +140,9 @@ def render_answer(result: dict) -> None:
             st.markdown(f"**{s['filename']}**{used}{score}")
             st.caption(s["snippet"])
 
+
+if DEMO_DOCS and not st.session_state.get("session_id"):
+    do_upload_paths(DEMO_DOCS)
 
 # ----------------------------------------------------------------- sidebar
 health = get_health()

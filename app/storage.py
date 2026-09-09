@@ -56,6 +56,9 @@ def search(session_id: str, question: str) -> list[dict]:
 
 
 def reset() -> None:
-    """Test helper - clear all sessions."""
+    """Test helper - clear all sessions and the answer cache."""
+    from app import cache
+
     with _lock:
         _SESSIONS.clear()
+    cache.clear()

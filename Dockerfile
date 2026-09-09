@@ -22,7 +22,8 @@ COPY app ./app
 # Pre-download the embedding model and the local QA model so the first
 # request is fast and the container needs no network at runtime.
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')" \
-    && python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')"
+    && python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')" \
+    && python -c "from app import ner; ner._load()"
 # (the DistilBERT model for QA_BACKEND=distilbert downloads on first use)
 
 EXPOSE 8000

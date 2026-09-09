@@ -53,6 +53,27 @@ def test_distilbert_qa_extracts_answer_span():
     assert result["sources"][0]["used"] is True
 
 
+def test_ner_tags_people_orgs_money_dates(monkeypatch):
+    from app.config import Settings
+    from app import ner
+
+    monkeypatch.setattr(ner, "get_settings", lambda: Settings(ner_enabled=True))
+    from app.ner import extract_entities
+
+    text = (
+        "On 1 August 2026 TechConsult d.o.o. agreed to pay Acme Corp "
+        "EUR 4,475.63, signed by John Smith in Zagreb."
+    )
+    labels = {e["label"] for e in extract_entities(text)}
+    assert "MONEY" in labels
+    assert "DATE" in labels
+    assert "PERSON" in labels
+    assert "ORG" in labels
+    # spans must be valid slices of the input
+    for e in extract_entities(text):
+        assert text[e["start"]:e["end"]] == e["text"]
+
+
 def test_sentence_qa_returns_relevant_sentence():
     from app.qa_sentences import answer_question
 

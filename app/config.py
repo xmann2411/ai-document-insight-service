@@ -41,18 +41,30 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     chunk_size: int = 900          # characters per chunk
     chunk_overlap: int = 150       # character overlap between consecutive chunks
-    top_k: int = 4                 # chunks passed to the QA backend
+    top_k: int = 6                 # chunks passed to the QA backend
     # FAISS returns this many candidates, then the cross-encoder reranks them
     # down to top_k. A cheap, large accuracy win (see app/rag.py).
     rerank_enabled: bool = True
     rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     rerank_candidates: int = 12
 
+    # --- Named Entity Recognition ---
+    # Highlights entities (people, orgs, places, money, dates, %) in answers.
+    # Transformer model (CoNLL-2003) via onnxruntime + regex for money/dates.
+    ner_enabled: bool = True
+    ner_model: str = "Xenova/bert-base-NER"
+
     # --- OCR ---
     # OCR (Tesseract via pytesseract) reads image uploads and PDFs that have
     # no text layer. Needs the `tesseract` binary on PATH (bundled in Docker).
     ocr_enabled: bool = True
     ocr_languages: str = "eng"     # Tesseract lang codes, e.g. "eng+hrv"
+
+    # --- Answer cache ---
+    # In-process LRU cache for /ask results, keyed by (session, question,
+    # backend). Swap for Redis in production - same get/put/invalidate API.
+    cache_enabled: bool = True
+    cache_size: int = 256
 
     # --- Uploads ---
     max_upload_mb: int = 25

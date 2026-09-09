@@ -28,16 +28,23 @@ logger = logging.getLogger(__name__)
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
 _MIN_SENT_CHARS = 12
-_LOW_CONFIDENCE = -3.0
+# Say "no clear answer" only when the best sentence scores low *and* isn't
+# clearly separated from the rest. Short tabular lines (receipts) score low
+# in absolute terms even when they're obviously the answer, so the margin
+# check matters more than the absolute threshold.
+_LOW_CONFIDENCE = -1.0
+_SEPARATION_MARGIN = 2.5
 
 
 def _is_heading(line: str) -> bool:
-    """A short label line with no sentence punctuation, e.g. '7. Governing law'."""
+    """A short label line with no sentence punctuation, e.g. '7. Governing law'.
+    Lines carrying their own data (digits, '#', ':') are not headings."""
     core = re.sub(r"^\d+[.)]\s*", "", line).strip()
     return (
         0 < len(core.split()) <= 5
         and line[-1] not in ".!?:"
         and core[:1].isupper()
+        and not re.search(r"[\d#:]", core)
     )
 
 
@@ -92,6 +99,8 @@ def answer_question(question: str, chunks: list[dict]) -> dict:
 
     ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
     top_score, (top_sent, top_chunk) = ranked[0]
+    runner_up = ranked[1][0] if len(ranked) > 1 else top_score - 10.0
+    well_separated = (top_score - runner_up) >= _SEPARATION_MARGIN
 
     # include the next sentence too if it's from the same chunk and also relevant
     answer_parts = [top_sent]
@@ -100,7 +109,7 @@ def answer_question(question: str, chunks: list[dict]) -> dict:
         if second_chunk is top_chunk and second_score > top_score - 2.0:
             answer_parts.append(second_sent)
 
-    if top_score < _LOW_CONFIDENCE:
+    if top_score < _LOW_CONFIDENCE and not well_separated:
         answer = (
             "The documents don't appear to contain a clear answer to that "
             f'question. Closest match: "{top_sent[:200]}"'

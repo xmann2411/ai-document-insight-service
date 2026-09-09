@@ -12,6 +12,7 @@ from pathlib import Path
 
 os.environ.setdefault("RETRIEVAL_MODE", "full")
 os.environ.setdefault("OCR_ENABLED", "false")
+os.environ.setdefault("NER_ENABLED", "false")
 os.environ.setdefault("QA_BACKEND", "claude")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-not-used")
 

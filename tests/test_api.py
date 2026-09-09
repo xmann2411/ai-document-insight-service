@@ -18,6 +18,19 @@ def test_health(client):
     body = r.json()
     assert body["status"] == "ok"
     assert body["qa_backend"] in {"local", "distilbert", "claude"}
+    assert "cache" in body
+
+
+def test_answer_is_cached_then_invalidated(client, fake_llm):
+    session_id = _upload(client, "sample_invoice.pdf").json()["session_id"]
+    q = {"session_id": session_id, "question": "total?"}
+
+    assert client.post("/ask", data=q).json()["cached"] is False
+    assert client.post("/ask", data=q).json()["cached"] is True
+
+    # adding a document must drop the cached answer
+    client.post(f"/sessions/{session_id}/documents", files=_files("sample_contract.pdf"))
+    assert client.post("/ask", data=q).json()["cached"] is False
 
 
 def test_upload_returns_session_and_records(client):

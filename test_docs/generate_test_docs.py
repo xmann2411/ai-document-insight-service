@@ -153,9 +153,9 @@ def _text_pdf(path: Path, pages: list[str]) -> None:
 def _image_png(path: Path, body: str) -> None:
     """Render text to a page, then export as a flat PNG (no text layer)."""
     doc = pymupdf.open()
-    page = doc.new_page(width=420, height=560)
-    page.insert_text((40, 60), body, fontname="courier", fontsize=12)
-    pix = page.get_pixmap(dpi=150)
+    page = doc.new_page(width=420, height=620)
+    page.insert_text((40, 60), body, fontname="helv", fontsize=13)
+    pix = page.get_pixmap(dpi=300)  # ~300 DPI so OCR reads it cleanly
     pix.save(path)
     doc.close()
     print("wrote", path.name)
